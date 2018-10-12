@@ -28,19 +28,58 @@ enum WayfairModelError: Error {
     }
 }
 
-struct APIResponse: Decodable {
-    var modelInfo: GLTFModelInfo?
+struct WayfairProduct: Decodable {
+    var sku: String
+    var productName: String
+    var productDescription: String
+    var productPageURL: String
+    var className: String
+    var salePrice: Float
+    var thumbnailImageURL: String
+    
+    var modelInfo: WayfairModelInfo
     
     enum CodingKeys: String, CodingKey {
-        case modelInfo = "product_3d_info"
+        case sku
+        case productName = "product_name"
+        case productDescription = "product_description"
+        case productPageURL = "product_page_url"
+        case className = "class_name"
+        case salePrice = "sale_price"
+        case thumbnailImageURL = "thumbnail_image_url"
+        case modelInfo = "model"
     }
 }
 
-struct GLTFModelInfo: Decodable {
-    var modelURLString: String?
+struct WayfairModelInfo: Decodable {
+    var dimensions: WayfairModelDimensions?
+    var glb: String
+    var obj: String
     
     enum CodingKeys: String, CodingKey {
-        case modelURLString = "preferred_gltf_url"
+        case dimensions = "dimensions_inches"
+        case glb
+        case obj
+    }
+}
+
+struct WayfairModelDimensions: Decodable {
+    var x: Float
+    var y: Float
+    var z: Float
+}
+
+struct APICredentials {
+    let username: String
+    let apiKey: String
+    
+    var authorizationHeader: [String: Any]? {
+        guard let authStringData = "\(username):\(apiKey)".data(using: .utf8) else {
+            return nil
+        }
+        
+        let authHeaderValue = "Basic \(authStringData.base64EncodedString())"
+        return ["Authorization" : authHeaderValue]
     }
 }
 
@@ -51,11 +90,13 @@ struct GLTFModelInfo: Decodable {
 class VirtualObjectLoader {
     
     private enum Constants {
-        static let baseURLString = "https://www.wayfair.com/v/product/get_model_info?_format=json&clearcache=true&sku="
+        static let baseURLString = "https://wayfair.com/3dapi/models"
     }
     
     private(set) var loadedObjects = [VirtualObject]()
     private(set) var isLoading = false
+    
+    private var urlSession: URLSession?
     
     // MARK: - Removing Objects
     
@@ -75,9 +116,9 @@ class VirtualObjectLoader {
     
     // MARK: - Loading Wayfair Models
     
-    func loadWayfairModel(forSKU sku: String, successHandler: @escaping WayfairModelLoadSuccessHandler, failureHandler: @escaping WayfairModelLoadFailureHandler) {
+    func loadWayfairModel(forSKU sku: String?, credentials: APICredentials? = nil, successHandler: @escaping WayfairModelLoadSuccessHandler, failureHandler: @escaping WayfairModelLoadFailureHandler) {
         isLoading = true
-        print("Loading Wayfair 3D model for SKU \(sku)...")
+        print("Loading Wayfair 3D model \(sku != nil ? "For SKU \(sku!)" : "")...")
         
         let overriddenSuccessHandler: WayfairModelLoadSuccessHandler = { [weak self] (virtualObject: VirtualObject) in
             self?.isLoading = false
@@ -101,22 +142,31 @@ class VirtualObjectLoader {
         }
         
         let urlFailure = { (error: WayfairModelError) in
-            failureHandler(error)
+            overriddenFailureHandler(error)
         }
         
         print("Fetching model URL...")
-        fetchModelURL(forSKU: sku, successHandler: urlSuccess, failureHandler: urlFailure)
+        fetchModelURL(forSKU: sku, credentials: credentials, successHandler: urlSuccess, failureHandler: urlFailure)
     }
     
-    private func fetchModelURL(forSKU sku: String, successHandler: @escaping (URL) -> Void, failureHandler: @escaping (WayfairModelError) -> Void) {
-        guard let urlForSKU = URL(string: Constants.baseURLString + sku) else {
-            failureHandler(.invalidURL)
-            return
+    private func fetchModelURL(forSKU sku: String?, credentials: APICredentials? = nil, successHandler: @escaping (URL) -> Void, failureHandler: @escaping (WayfairModelError) -> Void) {
+        let requestURL: URL
+        if let theSKU = sku {
+            requestURL = URL(string: Constants.baseURLString + "?sku=\(theSKU)")!
+        } else {
+            requestURL = URL(string: Constants.baseURLString)!
+        }
+
+        var urlSession = URLSession.shared
+        if let credentials = credentials, let authHeader = credentials.authorizationHeader {
+            let sessionConfig = URLSessionConfiguration.default
+            sessionConfig.httpAdditionalHeaders = authHeader
+            urlSession = URLSession(configuration: sessionConfig)
         }
         
-        let dataTask = URLSession.shared.dataTask(with: urlForSKU) { (data, response, error) in
+        let dataTask = urlSession.dataTask(with: requestURL) { (data, response, error) in
             if let responseData = data {
-                self.didLoadModelURLData(responseData, successHandler: successHandler, failureHandler: failureHandler)
+                self.didLoadModelURLData(responseData, lookingForSKU: sku, successHandler: successHandler, failureHandler: failureHandler)
             } else {
                 failureHandler(.invalidResponse)
             }
@@ -124,20 +174,31 @@ class VirtualObjectLoader {
         dataTask.resume()
     }
     
-    private func didLoadModelURLData(_ data: Data, successHandler: (URL) -> Void, failureHandler: @escaping (WayfairModelError) -> Void) {
+    private func didLoadModelURLData(_ data: Data, lookingForSKU sku: String?, successHandler: (URL) -> Void, failureHandler: @escaping (WayfairModelError) -> Void) {
         do {
-            let apiResponse = try JSONDecoder().decode(APIResponse.self, from: data)
-            if let modelURLString = apiResponse.modelInfo?.modelURLString, let modelURL = URL(string: modelURLString) {
-                successHandler(modelURL)
-            } else {
-                failureHandler(.noModelForSKU)
+            let products = try JSONDecoder().decode([WayfairProduct].self, from: data)
+            
+            var modelURL: URL?
+            if let sku = sku, let resultForSKU = products.first(where: { (product) -> Bool in product.sku == sku }),
+               let skuModelURL = URL(string: resultForSKU.modelInfo.glb) {
+                modelURL = skuModelURL
+            } else if let firstResultModelURLString = products.first?.modelInfo.glb,
+                      let firstResultModelURL = URL(string: firstResultModelURLString) {
+                modelURL = firstResultModelURL
             }
+
+            guard let url = modelURL else {
+                failureHandler(.noModelForSKU)
+                return
+            }
+            
+            successHandler(url)
         } catch {
-            failureHandler(.noModelForSKU)
+            failureHandler(.invalidResponse)
         }
     }
     
-    private func loadModelForSKU(_ sku: String, fromUrl url: URL, successHandler: @escaping WayfairModelLoadSuccessHandler, failureHandler: @escaping WayfairModelLoadFailureHandler) {
+    private func loadModelForSKU(_ sku: String?, fromUrl url: URL, successHandler: @escaping WayfairModelLoadSuccessHandler, failureHandler: @escaping WayfairModelLoadFailureHandler) {
         do {
             let gltfScene = try GLTFSceneSource(url: url).scene()
             guard let modelNode = gltfScene.rootNode.childNodes.first else {
@@ -165,10 +226,11 @@ class VirtualObjectLoader {
             }).first?.geometry
             shadowPlaneGeometry?.firstMaterial?.lightingModel = .constant
             
-            let virtualObject = VirtualObject(sku: sku, wayfairModelNode: modelNode)
+            let modelName = sku ?? "WayfairModel"
+            let virtualObject = VirtualObject(modelName: modelName, wayfairModelNode: modelNode)
             
             DispatchQueue.main.async {
-                print("Successfully decoded GLTF model for \(sku).  Returning to sender...")
+                print("Successfully decoded GLTF model.  Returning to sender...")
                 successHandler(virtualObject)
             }
         } catch {

@@ -11,10 +11,6 @@ import ARKit
 
 class VirtualObject: SCNNode {
     
-    var modelName: String {
-        return sku
-    }
-    
     /// Use average of recent virtual object distances to avoid rapid changes in object scale.
     private var recentVirtualObjectDistances = [Float]()
     
@@ -60,11 +56,11 @@ class VirtualObject: SCNNode {
     /// The object's corresponding ARAnchor
     var anchor: ARAnchor?
     
-    /// The SKU used to retrieve this model
-    let sku: String
+    /// The name of the model
+    var modelName: String
     
-    init(sku: String, wayfairModelNode: SCNNode) {
-        self.sku = sku
+    init(modelName: String, wayfairModelNode: SCNNode) {
+        self.modelName = modelName
         super.init()
         addChildNode(wayfairModelNode)
     }

@@ -24,25 +24,23 @@ extension ViewController: UIGestureRecognizerDelegate {
         statusViewController.cancelScheduledMessage(for: .contentPlacement)
         
         let controller = UIAlertController(title: "Enter a SKU", message: nil, preferredStyle: .alert)
-        let loadModelAction = UIAlertAction(title: "Load", style: .default) { [weak self] (_) in
-            guard let sku = controller.textFields?.first?.text?.uppercased() else {
-                return
+        let loadModelAction = UIAlertAction(title: "Load Model", style: .default) { [weak self] (_) in
+            var sku = controller.textFields?.first?.text?.uppercased()
+            if sku == "" {
+                sku = nil
             }
             
             self?.loadModelForSKU(sku)
         }
-        let loadReclinerModelAction = UIAlertAction(title: "Load Recliner (VVRE3131)", style: .default) { [weak self] (_) in
-            self?.loadModelForSKU("VVRE3131")
-        }
+        
         controller.addAction(loadModelAction)
-        controller.addAction(loadReclinerModelAction)
         controller.addTextField { (textField) in
             textField.placeholder = "SKU"
         }
         present(controller, animated: true, completion: nil)
     }
     
-    private func loadModelForSKU(_ sku: String) {
+    private func loadModelForSKU(_ sku: String?) {
         let success = { [weak self] (model: VirtualObject) -> Void in
             self?.addWayfairVirtualObjectToScene(model)
         }

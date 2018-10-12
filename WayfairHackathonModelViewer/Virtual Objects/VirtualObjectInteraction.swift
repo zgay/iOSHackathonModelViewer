@@ -110,6 +110,7 @@ class VirtualObjectInteraction: NSObject, UIGestureRecognizerDelegate {
     @objc
     func didRotate(_ gesture: UIRotationGestureRecognizer) {
         guard gesture.state == .changed else { return }
+        /// Flip the sign here to make the model rotate the other way
         trackedObject?.objectRotation += Float(gesture.rotation)
         gesture.rotation = 0
     }
