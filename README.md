@@ -1,4 +1,4 @@
-# iOSHackathonModelViewer
+# iOS Hackathon Model Viewer
 
 A simple Wayfair model viewer based on Apple sample code (https://developer.apple.com/documentation/arkit/handling_3d_interaction_and_ui_controls_in_augmented_reality)
 
